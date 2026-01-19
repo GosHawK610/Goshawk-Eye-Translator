@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
-from PIL import ImageGrab
+from PIL import ImageGrab, Image, ImageTk
 import easyocr
 import numpy as np
 from deep_translator import GoogleTranslator
@@ -11,13 +11,19 @@ import sys
 import win32gui
 import win32con
 import os
+import webbrowser 
+import requests 
+import ctypes # YENİ: Görev çubuğu ikonu için gerekli
 
-# --- GOSHAWK EYE v1.0 ---
-# Final Release (Complete Edition)
-# Includes: Auto-Fit, System Requirements Info, Multi-Language, Z-Order Fix
+# --- GOSHAWK EYE v1.1 ---
+# Final Release (Icon Fixed)
+# Fix: Added AppUserModelID to force Windows Taskbar icon.
+# Fix: Applied iconbitmap to the visible 'menu' window, not just the hidden 'root'.
+
+CURRENT_VERSION = "1.1" 
+VERSION_URL = "https://aoe4labs.com/version.txt" 
 
 def resource_path(relative_path):
-    """ EXE içindeki dosya yolunu bulur """
     try:
         base_path = sys._MEIPASS
     except Exception:
@@ -37,6 +43,18 @@ LANGUAGES = {
     "Chinese":    ("ch_sim", "zh-CN")   
 }
 
+# --- GÖRSEL AYARLAR ---
+COLORS = {
+    "Yellow":           "yellow",
+    "Cyan":             "#00cec9",
+    "Green":            "#55efc4",
+    "White":            "white",
+    "Orange":           "#ff7675",
+    "Black":            "#050505"
+}
+
+FONT_SIZES = ["10", "12", "14", "16", "18", "20", "22", "24"]
+
 class AlanSecici:
     def __init__(self, master_root):
         self.top = tk.Toplevel(master_root)
@@ -44,6 +62,10 @@ class AlanSecici:
         self.top.attributes('-alpha', 0.3)
         self.top.configure(background='black')
         self.top.attributes("-topmost", True)
+        
+        # İkonu buraya da ekleyelim (Garanti olsun)
+        try: self.top.iconbitmap(resource_path("logo.ico"))
+        except: pass
         
         self.start_x = None
         self.start_y = None
@@ -90,13 +112,14 @@ class AlanSecici:
             self.top.destroy()
 
 class EkranCevirici:
-    def __init__(self, root, ocr_code, trans_src, trans_trg):
+    def __init__(self, root, ocr_code, trans_src, trans_trg, text_color, font_size):
         self.root = root
-        self.root.title("GosHawK Eye v1.0") 
+        self.root.title(f"GosHawK Eye v{CURRENT_VERSION}") 
         self.root.attributes("-topmost", True)
         self.root.overrideredirect(True)
         self.root.wm_attributes("-transparentcolor", "black")
         
+        # Ana pencereye ikonu zorla
         try:
             self.root.iconbitmap(resource_path("logo.ico"))
         except: pass
@@ -105,21 +128,23 @@ class EkranCevirici:
         self.aktif = False
         self.son_ceviri = "" 
         
-        # Pencere Boyut Değişkenleri
-        self.win_x = 0
-        self.win_y = 0
-        self.min_width = 400 # En az 400px genişlik olacak
+        self.min_width = 400 
         self.current_width = 100
+        self.win_x = 0
         
         self.ocr_code = ocr_code
+        self.text_color = text_color
+        self.font_size = font_size
 
         self.canvas = tk.Canvas(self.root, bg="black", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         
-        self.text_shadow = self.canvas.create_text(10, 10, text="", font=("Segoe UI", 12, "bold"), fill="black", anchor="nw")
-        self.text_main = self.canvas.create_text(10, 10, text="", font=("Segoe UI", 12, "bold"), fill="#00cec9", anchor="nw")
+        font_style = ("Segoe UI", self.font_size, "bold")
         
-        print(f"GosHawK Eye v1.0: Loading Engine (OCR: {ocr_code} | TR: {trans_src}->{trans_trg})...")
+        self.text_shadow = self.canvas.create_text(10, 10, text="", font=font_style, fill="black", anchor="nw")
+        self.text_main = self.canvas.create_text(10, 10, text="", font=font_style, fill=self.text_color, anchor="nw")
+        
+        print(f"Engine Loaded: {ocr_code} -> {trans_trg} | Color: {text_color} | Size: {font_size}")
         
         self.reader = easyocr.Reader([self.ocr_code], gpu=False) 
         self.translator = GoogleTranslator(source=trans_src, target=trans_trg)
@@ -143,37 +168,41 @@ class EkranCevirici:
                                  win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
         except: pass
 
-    def arayuz_yaz(self, metin, renk="#00cec9"):
-        # Yazı genişliği: Pencere genişliğinden biraz az olsun
+    def arayuz_yaz(self, metin, renk):
         text_width_limit = self.current_width - 20
-        
-        # 1. Yazıyı güncelle
-        self.canvas.itemconfig(self.text_shadow, text=metin, width=text_width_limit)
+        font_style = ("Segoe UI", self.font_size, "bold")
+
+        shadow_color = "white" if self.text_color == "#050505" else "black"
+
+        self.canvas.itemconfig(self.text_shadow, text=metin, width=text_width_limit, font=font_style, fill=shadow_color)
         self.canvas.coords(self.text_shadow, 12, 12)
-        self.canvas.itemconfig(self.text_main, text=metin, fill=renk, width=text_width_limit)
+        
+        final_color = "green" if metin == "Scanning..." else (renk if renk != "yellow" else self.text_color)
+        
+        self.canvas.itemconfig(self.text_main, text=metin, fill=final_color, width=text_width_limit, font=font_style)
         self.canvas.coords(self.text_main, 10, 10)
         
-        # 2. Yazının kapladığı alanı hesapla (Otomatik Yükseklik)
         bbox = self.canvas.bbox(self.text_main)
-        if bbox:
+        if bbox and self.scan_region:
             text_height = bbox[3] - bbox[1]
-            # Pencere yüksekliğini yazıya göre ayarla (+30px boşluk)
-            new_height = max(text_height + 30, 80)
-            self.root.geometry(f"{self.current_width}x{new_height}+{self.win_x}+{self.win_y}")
+            new_height = max(text_height + 40, 80)
+            
+            sel_x1, sel_y1, sel_x2, sel_y2 = self.scan_region
+            
+            target_y = sel_y1 - new_height - 10
+            
+            if target_y < 0:
+                target_y = sel_y2 + 10 
+                
+            self.root.geometry(f"{self.current_width}x{new_height}+{self.win_x}+{target_y}")
 
     def konumlandir(self, bolge):
         self.scan_region = bolge
-        
-        # Seçilen alanın genişliğini al
         selection_width = bolge[2] - bolge[0]
-        
-        # Eğer seçilen alan çok darsa, pencereyi GENİŞ tut (En az 400px)
         self.current_width = max(selection_width, self.min_width)
-        
         self.win_x = bolge[0]
-        self.win_y = max(bolge[1] - 80, 0)
         
-        self.root.geometry(f"{self.current_width}x80+{self.win_x}+{self.win_y}")
+        self.root.geometry(f"{self.current_width}x80+{self.win_x}+{bolge[1]-100}")
         self.arayuz_yaz("GOSHAWK EYE READY: [F2] START", "white")
         self.root.deiconify()
         self.root.after(100, self.hayalet_modu_aktif_et)
@@ -199,7 +228,7 @@ class EkranCevirici:
         except: pass
 
         if self.aktif:
-            if self.son_ceviri: self.arayuz_yaz(self.son_ceviri, "yellow")
+            if self.son_ceviri: self.arayuz_yaz(self.son_ceviri, self.text_color)
             else: self.arayuz_yaz("Scanning...", "green")
         else:
             self.arayuz_yaz(f"PAUSED [F2]", "red")
@@ -236,73 +265,122 @@ def create_hover_button(parent, text, command, bg_color="#0984e3", hover_color="
     return btn
 
 def main():
-    root = tk.Tk()
-    root.withdraw()
-
+    # --- 1. GÖREV ÇUBUĞU İKONU ÇÖZÜMÜ (APP ID) ---
     try:
-        root.iconbitmap(resource_path("logo.ico"))
+        # Windows'a "Ben sıradan bir Python scripti değilim, ben GosHawK Eye'ım" diyoruz.
+        myappid = 'aoe4labs.goshawkeye.tool.v1' 
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    except: pass
+
+    root = tk.Tk()
+    root.withdraw() # Ana pencereyi gizle
+
+    # --- 2. İKON ATAMA (HEM ROOT HEM MENÜ İÇİN) ---
+    try:
+        icon_path = resource_path("logo.ico")
+        root.iconbitmap(icon_path) # Root'a ata (Arka plan için)
     except: pass
 
     menu = tk.Toplevel(root)
-    menu.title("GosHawK Eye v1.0") 
-    menu.geometry('500x650') 
+    menu.title(f"GosHawK Eye v{CURRENT_VERSION}") 
+    menu.geometry('500x620') 
     
+    # --- 3. GÖRÜNÜR PENCEREYE İKONU ZORLA ---
     try:
-        menu.iconbitmap(resource_path("logo.ico"))
+        menu.iconbitmap(icon_path)
     except: pass
     
     bg_dark = "#2d3436"
     bg_frame = "#353b48"
     accent_color = "#00cec9"
     menu.configure(bg=bg_dark)
-    
+
     x = (menu.winfo_screenwidth()/2) - 250
-    y = (menu.winfo_screenheight()/2) - 325
+    y = (menu.winfo_screenheight()/2) - 310 
     menu.geometry('+%d+%d' % (x, y))
 
     logo_frame = tk.Frame(menu, bg=bg_dark)
-    logo_frame.pack(pady=(35, 10))
+    logo_frame.pack(pady=(25, 5))
 
     tk.Label(logo_frame, text="◎", font=("Segoe UI Symbol", 50), fg=accent_color, bg=bg_dark).pack(side="left", padx=5)
     title_label = tk.Label(logo_frame, text="GOSHAWK EYE", font=("Segoe UI Black", 26, "bold"), fg="white", bg=bg_dark)
     title_label.pack(side="left")
 
-    tk.Label(menu, text="v1.0 - Global Edition", font=("Segoe UI", 10, "italic"), fg="#dfe6e9", bg=bg_dark).pack(pady=(0, 10))
+    tk.Label(menu, text=f"v{CURRENT_VERSION}", font=("Segoe UI", 10, "italic"), fg="#dfe6e9", bg=bg_dark).pack(pady=(0, 10))
 
-    # --- DİL SEÇİM ALANI ---
-    lang_frame = tk.Frame(menu, bg=bg_frame, padx=10, pady=10)
-    lang_frame.pack(fill="x", padx=40, pady=10)
+    # --- AYARLAR ---
+    settings_frame = tk.Frame(menu, bg=bg_frame, padx=15, pady=15)
+    settings_frame.pack(fill="x", padx=40, pady=5)
 
-    tk.Label(lang_frame, text="TRANSLATION SETTINGS", font=("Segoe UI", 10, "bold"), bg=bg_frame, fg="white").pack(pady=(0,5))
+    tk.Label(settings_frame, text="TRANSLATION SETTINGS", font=("Segoe UI", 10, "bold"), bg=bg_frame, fg="white").pack(pady=(0,10))
 
-    # Değişkenler
+    grid_frame = tk.Frame(settings_frame, bg=bg_frame)
+    grid_frame.pack(fill="x")
+
+    grid_frame.grid_columnconfigure(0, weight=1)
+    grid_frame.grid_columnconfigure(1, weight=1)
+    grid_frame.grid_columnconfigure(2, weight=1) 
+    grid_frame.grid_columnconfigure(3, weight=1)
+    grid_frame.grid_columnconfigure(4, weight=1)
+
     source_var = tk.StringVar(menu)
     target_var = tk.StringVar(menu)
+    color_var = tk.StringVar(menu)
+    size_var = tk.StringVar(menu)
+
     source_var.set("English") 
     target_var.set("Turkish") 
+    color_var.set("Yellow") 
+    size_var.set("12")
 
-    # Kaynak Dil
-    tk.Label(lang_frame, text="Game Language (Source):", font=("Segoe UI", 9), bg=bg_frame, fg="#dfe6e9").pack(anchor="w")
-    source_menu = tk.OptionMenu(lang_frame, source_var, *LANGUAGES.keys())
-    source_menu.config(bg="#636e72", fg="white", highlightthickness=0, borderwidth=0)
+    tk.Label(grid_frame, text="Source:", font=("Segoe UI", 9), bg=bg_frame, fg="#dfe6e9").grid(row=0, column=0, sticky="w")
+    source_menu = tk.OptionMenu(grid_frame, source_var, *LANGUAGES.keys())
+    source_menu.config(bg="#636e72", fg="white", width=9, highlightthickness=0, borderwidth=0)
     source_menu["menu"].config(bg="#636e72", fg="white")
-    source_menu.pack(fill="x", pady=(0, 10))
+    source_menu.grid(row=0, column=1, sticky="w", pady=5)
 
-    # Hedef Dil
-    tk.Label(lang_frame, text="Translate To (Target):", font=("Segoe UI", 9), bg=bg_frame, fg="#dfe6e9").pack(anchor="w")
-    target_menu = tk.OptionMenu(lang_frame, target_var, *LANGUAGES.keys())
-    target_menu.config(bg="#636e72", fg="white", highlightthickness=0, borderwidth=0)
+    tk.Label(grid_frame, text="Target:", font=("Segoe UI", 9), bg=bg_frame, fg="#dfe6e9").grid(row=1, column=0, sticky="w")
+    target_menu = tk.OptionMenu(grid_frame, target_var, *LANGUAGES.keys())
+    target_menu.config(bg="#636e72", fg="white", width=9, highlightthickness=0, borderwidth=0)
     target_menu["menu"].config(bg="#636e72", fg="white")
-    target_menu.pack(fill="x")
+    target_menu.grid(row=1, column=1, sticky="w", pady=5)
 
-    # --- KISAYOL KUTUSU ---
+    tk.Frame(grid_frame, bg=bg_frame, width=20).grid(row=0, column=2, rowspan=2)
+
+    tk.Label(grid_frame, text="Color:", font=("Segoe UI", 9), bg=bg_frame, fg="#b2bec3").grid(row=0, column=3, sticky="w")
+    color_menu = tk.OptionMenu(grid_frame, color_var, *COLORS.keys())
+    color_menu.config(bg="#636e72", fg="white", width=9, highlightthickness=0, borderwidth=0)
+    color_menu["menu"].config(bg="#636e72", fg="white")
+    color_menu.grid(row=0, column=4, sticky="w", pady=5)
+
+    tk.Label(grid_frame, text="Size:", font=("Segoe UI", 9), bg=bg_frame, fg="#b2bec3").grid(row=1, column=3, sticky="w")
+    size_menu = tk.OptionMenu(grid_frame, size_var, *FONT_SIZES)
+    size_menu.config(bg="#636e72", fg="white", width=9, highlightthickness=0, borderwidth=0)
+    size_menu["menu"].config(bg="#636e72", fg="white")
+    size_menu.grid(row=1, column=4, sticky="w", pady=5)
+
     frame_border = tk.Frame(menu, bg=accent_color, padx=2, pady=2)
-    frame_border.pack(fill="x", padx=40, pady=(10, 0))
+    frame_border.pack(fill="x", padx=40, pady=(10, 0)) 
     frame_inner = tk.Frame(frame_border, bg=bg_frame, padx=10, pady=10)
     frame_inner.pack(fill="x")
     
     shortcuts = "HOTKEYS:\n[F2] Start / Pause\n[F3] Select New Area\n[End] Exit Application"
     tk.Label(frame_inner, text=shortcuts, font=("Consolas", 11, "bold"), bg=bg_frame, fg="white").pack()
+
+    # --- UPDATE CHECKER ---
+    def check_for_updates():
+        try:
+            nocache_url = f"{VERSION_URL}?t={int(time.time())}"
+            response = requests.get(nocache_url, timeout=3)
+            
+            if response.status_code == 200:
+                latest_version = response.text.strip()
+                if latest_version > CURRENT_VERSION:
+                    update_btn.pack(pady=10, before=start_btn)
+        except: pass
+
+    def open_site(e=None):
+        webbrowser.open("https://aoe4labs.com/translator.html")
 
     def show_info():
         info = tk.Toplevel(menu)
@@ -310,18 +388,22 @@ def main():
         try:
             info.iconbitmap(resource_path("logo.ico"))
         except: pass
-        info.geometry("400x450") # Pencere boyutu arttırıldı (Sığsın diye)
+        
+        info.geometry("400x450")
         info.configure(bg=bg_dark)
         ix = (info.winfo_screenwidth()/2) - 200
         iy = (info.winfo_screenheight()/2) - 225
         info.geometry('+%d+%d' % (ix, iy))
         
-        info_text = """
+        # --- DETAYLI BİLGİ EKRANI ---
+        info_text = f"""
+        VERSION: {CURRENT_VERSION}
+        
 ⚠️ PERFORMANCE & STARTUP ⚠️
 This application uses Advanced AI (Deep Learning).
-• High CPU usage is NORMAL.
-• Selecting 'Chinese' or other new languages 
-  will trigger a download on first use.
+• High CPU usage & Fan noise is NORMAL.
+• FIRST LAUNCH may take 15-20 seconds. 
+  Please be patient!
 
 DISPLAY MODE:
 • Works best in 'Borderless Window'.
@@ -341,23 +423,52 @@ TIPS:
     def baslat():
         src_name = source_var.get()
         trg_name = target_var.get()
+        color_name = color_var.get()
+        size_val = int(size_var.get())
         
         ocr_code = LANGUAGES[src_name][0]     
         trans_src = LANGUAGES[src_name][1]    
-        trans_trg = LANGUAGES[trg_name][1]    
+        trans_trg = LANGUAGES[trg_name][1]
+        selected_color_code = COLORS[color_name]
         
         menu.destroy()
         s = AlanSecici(root)
         if s.selected_area:
-            app = EkranCevirici(root, ocr_code, trans_src, trans_trg)
+            app = EkranCevirici(root, ocr_code, trans_src, trans_trg, selected_color_code, size_val)
             app.konumlandir(s.selected_area)
             app.root.mainloop()
         else: sys.exit()
 
+    # --- BUTONLAR ---
+    
+    update_btn = create_hover_button(menu, "✨ NEW UPDATE AVAILABLE! ✨", open_site, bg_color="#e17055", hover_color="#ff7675")
+    
     start_btn = create_hover_button(menu, "START HUNTING", baslat, bg_color="#0984e3", hover_color=accent_color)
-    start_btn.pack(pady=(20, 10))
+    start_btn.pack(pady=(15, 10))
+    
     info_btn = create_hover_button(menu, "SYSTEM INFO & TIPS", show_info, bg_color="#636e72", hover_color="#b2bec3", font=("Segoe UI", 10))
-    info_btn.pack(pady=10)
+    info_btn.pack(pady=5)
+
+    # --- BANNER ---
+    try:
+        img_path = resource_path("aoe4labs_banner.png")
+        original = Image.open(img_path).convert("RGBA")
+        width = 200 
+        height = int((width / original.width) * original.height)
+        resized = original.resize((width, height), Image.Resampling.LANCZOS)
+        banner_img = ImageTk.PhotoImage(resized)
+
+        banner_label = tk.Label(menu, image=banner_img, bg=bg_dark, cursor="hand2")
+        banner_label.image = banner_img 
+        
+        banner_label.bind("<Button-1>", open_site)
+        banner_label.pack(side="bottom", pady=(15, 20)) 
+    except Exception as e:
+        link_lbl = tk.Label(menu, text="Visit Official Home: aoe4labs.com", font=("Segoe UI", 10, "underline"), fg="#74b9ff", bg=bg_dark, cursor="hand2")
+        link_lbl.pack(side="bottom", pady=15)
+        link_lbl.bind("<Button-1>", open_site)
+
+    threading.Thread(target=check_for_updates, daemon=True).start()
 
     root.mainloop()
 
