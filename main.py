@@ -13,12 +13,11 @@ import win32con
 import os
 import webbrowser 
 import requests 
-import ctypes # YENİ: Görev çubuğu ikonu için gerekli
+import ctypes
 
 # --- GOSHAWK EYE v1.1 ---
-# Final Release (Icon Fixed)
-# Fix: Added AppUserModelID to force Windows Taskbar icon.
-# Fix: Applied iconbitmap to the visible 'menu' window, not just the hidden 'root'.
+# Final Release (Taskbar Icon Fix)
+# Fix: Main Menu is now the ROOT window (not Toplevel), ensuring Taskbar Icon works.
 
 CURRENT_VERSION = "1.1" 
 VERSION_URL = "https://aoe4labs.com/version.txt" 
@@ -63,7 +62,6 @@ class AlanSecici:
         self.top.configure(background='black')
         self.top.attributes("-topmost", True)
         
-        # İkonu buraya da ekleyelim (Garanti olsun)
         try: self.top.iconbitmap(resource_path("logo.ico"))
         except: pass
         
@@ -114,16 +112,14 @@ class AlanSecici:
 class EkranCevirici:
     def __init__(self, root, ocr_code, trans_src, trans_trg, text_color, font_size):
         self.root = root
+        # Root artık ana pencere olduğu için, onu overlay'e dönüştürüyoruz
         self.root.title(f"GosHawK Eye v{CURRENT_VERSION}") 
         self.root.attributes("-topmost", True)
         self.root.overrideredirect(True)
         self.root.wm_attributes("-transparentcolor", "black")
         
-        # Ana pencereye ikonu zorla
-        try:
-            self.root.iconbitmap(resource_path("logo.ico"))
-        except: pass
-
+        # İkonu tekrar set etmeye gerek yok, root zaten ikonlu geliyor
+        
         self.scan_region = None
         self.aktif = False
         self.son_ceviri = "" 
@@ -265,51 +261,45 @@ def create_hover_button(parent, text, command, bg_color="#0984e3", hover_color="
     return btn
 
 def main():
-    # --- 1. GÖREV ÇUBUĞU İKONU ÇÖZÜMÜ (APP ID) ---
+    # --- 1. WINDOWS KİMLİĞİ (CACHE'İ KIRMAK İÇİN YENİ ID) ---
     try:
-        # Windows'a "Ben sıradan bir Python scripti değilim, ben GosHawK Eye'ım" diyoruz.
-        myappid = 'aoe4labs.goshawkeye.tool.v1' 
+        myappid = 'aoe4labs.goshawk.eye.final.v1.1' # Yeni bir ID
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except: pass
 
+    # --- 2. ROOT PENCERESİ ARTIK GİZLENMİYOR (ANA MENÜ BUDUR) ---
     root = tk.Tk()
-    root.withdraw() # Ana pencereyi gizle
-
-    # --- 2. İKON ATAMA (HEM ROOT HEM MENÜ İÇİN) ---
+    
+    # İkonu Root'a ata (Görünür pencere bu olduğu için Taskbar bunu alır)
     try:
         icon_path = resource_path("logo.ico")
-        root.iconbitmap(icon_path) # Root'a ata (Arka plan için)
+        root.iconbitmap(icon_path)
     except: pass
 
-    menu = tk.Toplevel(root)
-    menu.title(f"GosHawK Eye v{CURRENT_VERSION}") 
-    menu.geometry('500x620') 
-    
-    # --- 3. GÖRÜNÜR PENCEREYE İKONU ZORLA ---
-    try:
-        menu.iconbitmap(icon_path)
-    except: pass
+    root.title(f"GosHawK Eye v{CURRENT_VERSION}") 
+    root.geometry('500x620') 
     
     bg_dark = "#2d3436"
     bg_frame = "#353b48"
     accent_color = "#00cec9"
-    menu.configure(bg=bg_dark)
+    root.configure(bg=bg_dark)
 
-    x = (menu.winfo_screenwidth()/2) - 250
-    y = (menu.winfo_screenheight()/2) - 310 
-    menu.geometry('+%d+%d' % (x, y))
+    x = (root.winfo_screenwidth()/2) - 250
+    y = (root.winfo_screenheight()/2) - 310 
+    root.geometry('+%d+%d' % (x, y))
 
-    logo_frame = tk.Frame(menu, bg=bg_dark)
+    # --- WIDGET'LAR ARTIK 'root' ÜZERİNE KURULUYOR ---
+    logo_frame = tk.Frame(root, bg=bg_dark)
     logo_frame.pack(pady=(25, 5))
 
     tk.Label(logo_frame, text="◎", font=("Segoe UI Symbol", 50), fg=accent_color, bg=bg_dark).pack(side="left", padx=5)
     title_label = tk.Label(logo_frame, text="GOSHAWK EYE", font=("Segoe UI Black", 26, "bold"), fg="white", bg=bg_dark)
     title_label.pack(side="left")
 
-    tk.Label(menu, text=f"v{CURRENT_VERSION}", font=("Segoe UI", 10, "italic"), fg="#dfe6e9", bg=bg_dark).pack(pady=(0, 10))
+    tk.Label(root, text=f"v{CURRENT_VERSION}", font=("Segoe UI", 10, "italic"), fg="#dfe6e9", bg=bg_dark).pack(pady=(0, 10))
 
     # --- AYARLAR ---
-    settings_frame = tk.Frame(menu, bg=bg_frame, padx=15, pady=15)
+    settings_frame = tk.Frame(root, bg=bg_frame, padx=15, pady=15)
     settings_frame.pack(fill="x", padx=40, pady=5)
 
     tk.Label(settings_frame, text="TRANSLATION SETTINGS", font=("Segoe UI", 10, "bold"), bg=bg_frame, fg="white").pack(pady=(0,10))
@@ -323,10 +313,10 @@ def main():
     grid_frame.grid_columnconfigure(3, weight=1)
     grid_frame.grid_columnconfigure(4, weight=1)
 
-    source_var = tk.StringVar(menu)
-    target_var = tk.StringVar(menu)
-    color_var = tk.StringVar(menu)
-    size_var = tk.StringVar(menu)
+    source_var = tk.StringVar(root)
+    target_var = tk.StringVar(root)
+    color_var = tk.StringVar(root)
+    size_var = tk.StringVar(root)
 
     source_var.set("English") 
     target_var.set("Turkish") 
@@ -359,7 +349,7 @@ def main():
     size_menu["menu"].config(bg="#636e72", fg="white")
     size_menu.grid(row=1, column=4, sticky="w", pady=5)
 
-    frame_border = tk.Frame(menu, bg=accent_color, padx=2, pady=2)
+    frame_border = tk.Frame(root, bg=accent_color, padx=2, pady=2)
     frame_border.pack(fill="x", padx=40, pady=(10, 0)) 
     frame_inner = tk.Frame(frame_border, bg=bg_frame, padx=10, pady=10)
     frame_inner.pack(fill="x")
@@ -383,7 +373,7 @@ def main():
         webbrowser.open("https://aoe4labs.com/translator.html")
 
     def show_info():
-        info = tk.Toplevel(menu)
+        info = tk.Toplevel(root)
         info.title("System Info & Tips")
         try:
             info.iconbitmap(resource_path("logo.ico"))
@@ -395,7 +385,6 @@ def main():
         iy = (info.winfo_screenheight()/2) - 225
         info.geometry('+%d+%d' % (ix, iy))
         
-        # --- DETAYLI BİLGİ EKRANI ---
         info_text = f"""
         VERSION: {CURRENT_VERSION}
         
@@ -431,22 +420,29 @@ TIPS:
         trans_trg = LANGUAGES[trg_name][1]
         selected_color_code = COLORS[color_name]
         
-        menu.destroy()
+        # --- KRİTİK HAMLE: MENÜYÜ SİL VE ROOT'U SAKLA ---
+        # Menü widgetlarını temizle (Root'u boşaltıyoruz)
+        for widget in root.winfo_children():
+            widget.destroy()
+
+        root.withdraw() # Seçim sırasında gizle
+        
         s = AlanSecici(root)
         if s.selected_area:
+            # EkranCevirici artık boşalmış olan 'root' penceresini devralacak
             app = EkranCevirici(root, ocr_code, trans_src, trans_trg, selected_color_code, size_val)
             app.konumlandir(s.selected_area)
-            app.root.mainloop()
+            # root.mainloop() zaten aşağıda çalışıyor
         else: sys.exit()
 
     # --- BUTONLAR ---
     
-    update_btn = create_hover_button(menu, "✨ NEW UPDATE AVAILABLE! ✨", open_site, bg_color="#e17055", hover_color="#ff7675")
+    update_btn = create_hover_button(root, "✨ NEW UPDATE AVAILABLE! ✨", open_site, bg_color="#e17055", hover_color="#ff7675")
     
-    start_btn = create_hover_button(menu, "START HUNTING", baslat, bg_color="#0984e3", hover_color=accent_color)
+    start_btn = create_hover_button(root, "START HUNTING", baslat, bg_color="#0984e3", hover_color=accent_color)
     start_btn.pack(pady=(15, 10))
     
-    info_btn = create_hover_button(menu, "SYSTEM INFO & TIPS", show_info, bg_color="#636e72", hover_color="#b2bec3", font=("Segoe UI", 10))
+    info_btn = create_hover_button(root, "SYSTEM INFO & TIPS", show_info, bg_color="#636e72", hover_color="#b2bec3", font=("Segoe UI", 10))
     info_btn.pack(pady=5)
 
     # --- BANNER ---
@@ -458,13 +454,13 @@ TIPS:
         resized = original.resize((width, height), Image.Resampling.LANCZOS)
         banner_img = ImageTk.PhotoImage(resized)
 
-        banner_label = tk.Label(menu, image=banner_img, bg=bg_dark, cursor="hand2")
+        banner_label = tk.Label(root, image=banner_img, bg=bg_dark, cursor="hand2")
         banner_label.image = banner_img 
         
         banner_label.bind("<Button-1>", open_site)
         banner_label.pack(side="bottom", pady=(15, 20)) 
     except Exception as e:
-        link_lbl = tk.Label(menu, text="Visit Official Home: aoe4labs.com", font=("Segoe UI", 10, "underline"), fg="#74b9ff", bg=bg_dark, cursor="hand2")
+        link_lbl = tk.Label(root, text="Visit Official Home: aoe4labs.com", font=("Segoe UI", 10, "underline"), fg="#74b9ff", bg=bg_dark, cursor="hand2")
         link_lbl.pack(side="bottom", pady=15)
         link_lbl.bind("<Button-1>", open_site)
 
